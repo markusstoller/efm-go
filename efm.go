@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/davidminor/uint128"
-	_ "github.com/davidminor/uint128"
 )
 
 type EFM struct {
