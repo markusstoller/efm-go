@@ -6,14 +6,22 @@ import (
 	"github.com/davidminor/uint128"
 )
 
+const InvalidCode = 0xFFFF
+const encodeBufferSize = 256
+const decodeBufferSize = 0x4000
+const QuattuordecupleSize = 14
+const StartPt = 112 - QuattuordecupleSize
+const BufferMask = 0x3FFF
+const Window = 8
+
 type EFM struct {
-	decodeMapping [0x4000]uint16
-	encodeMapping [256]uint16
+	decodeMapping [decodeBufferSize]uint16
+	encodeMapping [encodeBufferSize]uint16
 }
 
 func New() *EFM {
-	encodeMapping := [256]uint16{0xFFFF}
-	decodeMapping := [0x4000]uint16{0xFFFF}
+	encodeMapping := [encodeBufferSize]uint16{InvalidCode}
+	decodeMapping := [decodeBufferSize]uint16{InvalidCode}
 
 	efmRawTable := []uint16{
 		0b01001000100000,
@@ -284,24 +292,18 @@ func New() *EFM {
 	}
 }
 
-const QuattuordecupleSize = 14
-const StartPt = 112 - QuattuordecupleSize
-
 // encodeQuattuordecuple converts an 8-byte input slice into a uint128 value by encoding each byte and shifting into position.
 // Returns an error if the input slice length is less than 8.
 func (e *EFM) encodeQuattuordecuple(data []byte) (uint128.Uint128, error) {
 	result := uint128.Uint128{}
-	if len(data) < 8 {
+	if len(data) < Window {
 		return result, fmt.Errorf("data length must be at least 8")
 	}
 
-	for i := 0; i < 8; i++ {
+	for i := 0; i < Window; i++ {
 		shiftAmount := StartPt - i*QuattuordecupleSize
-
-		val := e.encodeMapping[data[i]]
-
 		// Convert val to uint128 and shift it to the correct position
-		valAs128 := uint128.Uint128{L: uint64(val)}
+		valAs128 := uint128.Uint128{L: uint64(e.encodeMapping[data[i]])}
 		shiftedVal := valAs128.ShiftLeft(uint(shiftAmount))
 
 		// Combine
@@ -313,20 +315,20 @@ func (e *EFM) encodeQuattuordecuple(data []byte) (uint128.Uint128, error) {
 // Encode encodes the provided data using EFM scheme, requiring the input length to be a multiple of 8 bytes.
 // It returns the encoded byte slice or an error if the input length is invalid.
 func (e *EFM) Encode(data []byte) ([]byte, error) {
-	if len(data)%8 != 0 {
+	if len(data)%Window != 0 {
 		return nil, fmt.Errorf("data length must be multiple of 8")
 	}
 
 	// Pre-allocate result slice with exact capacity needed
 	// Each 8-byte chunk produces 14 bytes of output (6 + 8)
-	numChunks := len(data) / 8
+	numChunks := len(data) / Window
 	result := make([]byte, 0, numChunks*QuattuordecupleSize)
 
 	// Reuse buffer for binary encoding to avoid repeated allocations
-	buf := make([]byte, 8)
+	buf := make([]byte, Window)
 
-	for i := 0; i < len(data); i += 8 {
-		encoded, _ := e.encodeQuattuordecuple(data[i : i+8])
+	for i := 0; i < len(data); i += Window {
+		encoded, _ := e.encodeQuattuordecuple(data[i : i+Window])
 
 		// Encode high part (only need 6 bytes from position 2)
 		binary.BigEndian.PutUint64(buf, encoded.H)
@@ -342,13 +344,13 @@ func (e *EFM) Encode(data []byte) ([]byte, error) {
 // decodeQuattuordecuple converts a uint128 encoded value into a slice of 8 decoded bytes using EFM decoding rules.
 // Returns an error if any segment of the encoded value is invalid.
 func (e *EFM) decodeQuattuordecuple(encodedValue uint128.Uint128) ([]byte, error) {
-	result := make([]byte, 8)
+	result := make([]byte, Window)
 
-	for i := 0; i < 8; i++ {
+	for i := 0; i < Window; i++ {
 		shiftAmount := StartPt - i*QuattuordecupleSize
-		decoded := e.decodeMapping[encodedValue.ShiftRight(uint(shiftAmount)).L&0x3FFF]
+		decoded := e.decodeMapping[encodedValue.ShiftRight(uint(shiftAmount)).L&BufferMask]
 
-		if decoded == 0xFFFF {
+		if decoded == InvalidCode {
 			return nil, fmt.Errorf("invalid value")
 		}
 
@@ -367,7 +369,7 @@ func (e *EFM) Decode(data []byte) ([]byte, error) {
 	}
 
 	for i := 0; i < len(data); i += QuattuordecupleSize {
-		uint128Data := uint128.Uint128{H: binary.BigEndian.Uint64(data[i+0:i+8]) >> 16, L: binary.BigEndian.Uint64(data[i+6 : i+14])}
+		uint128Data := uint128.Uint128{H: binary.BigEndian.Uint64(data[i+0:i+Window]) >> 16, L: binary.BigEndian.Uint64(data[i+6 : i+14])}
 		decoded, err := e.decodeQuattuordecuple(uint128Data)
 		if err != nil {
 			return nil, err
