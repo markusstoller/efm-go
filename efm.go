@@ -1,8 +1,10 @@
+// Package efm_go implements an encoding and decoding mapping structure with predefined buffer sizes for transformation
+// operations.
 package efm_go
 
 import (
 	"encoding/binary"
-	"fmt"
+	"errors"
 
 	"github.com/davidminor/uint128"
 )
@@ -16,11 +18,17 @@ const bufferMask = 0x3FFF
 const window = 8
 const shiftBits = 16
 
+var errLengthMismatch = errors.New("data length must be multiple of 8")
+var errLengthMismatchLong = errors.New("data length must be multiple of 14")
+var errInvalidValue = errors.New("invalid value")
+
+// EFM represents an encoding and decoding mapping structure with predefined buffer sizes for transformation operations.
 type EFM struct {
 	decodeMapping [decodeBufferSize]uint16
 	encodeMapping [encodeBufferSize]uint16
 }
 
+// New initializes and returns a new instance of the EFM struct.
 func New() *EFM {
 	encodeMapping := [encodeBufferSize]uint16{invalidCode}
 	decodeMapping := [decodeBufferSize]uint16{invalidCode}
@@ -71,10 +79,11 @@ func New() *EFM {
 		0b01000000010010, 0b00001000010010, 0b00010000010010, 0b00100000010010,
 	}
 
-	for i := 0; i < len(efmRawTable); i++ {
+	for i := range efmRawTable {
 		decodeMapping[efmRawTable[i]] = uint16(i)
 		encodeMapping[i] = efmRawTable[i]
 	}
+
 	return &EFM{
 		encodeMapping: encodeMapping,
 		decodeMapping: decodeMapping,
@@ -85,7 +94,7 @@ func New() *EFM {
 // It returns the encoded byte slice or an error if the input length is invalid.
 func (e *EFM) Encode(data []byte) ([]byte, error) {
 	if len(data)%window != 0 {
-		return nil, fmt.Errorf("data length must be multiple of 8")
+		return nil, errLengthMismatch
 	}
 
 	// Pre-allocate result slice with exact capacity needed
@@ -107,6 +116,7 @@ func (e *EFM) Encode(data []byte) ([]byte, error) {
 		binary.BigEndian.PutUint64(buf, encoded.L)
 		result = append(result, buf...)
 	}
+
 	return result, nil
 }
 
@@ -116,19 +126,20 @@ func (e *EFM) Decode(data []byte) ([]byte, error) {
 	result := make([]byte, 0, len(data)/quattuordecupleSize)
 
 	if len(data)%quattuordecupleSize != 0 {
-		return nil, fmt.Errorf("data length must be multiple of %d", quattuordecupleSize)
+		return nil, errLengthMismatchLong
 	}
 
 	for i := 0; i < len(data); i += quattuordecupleSize {
 		h := binary.BigEndian.Uint64(data[i+0:i+window]) >> shiftBits
 		l := binary.BigEndian.Uint64(data[i+6 : i+quattuordecupleSize])
 		uint128Data := uint128.Uint128{H: h, L: l}
+
 		decoded, err := e.decodeQuattuordecuple(uint128Data)
 		if err != nil {
 			return nil, err
 		}
-		result = append(result, decoded...)
 
+		result = append(result, decoded...)
 	}
 
 	return result, nil
@@ -139,20 +150,22 @@ func (e *EFM) Decode(data []byte) ([]byte, error) {
 //
 // Returns an error if the input slice length is less than 8.
 func (e *EFM) encodeQuattuordecuple(data []byte) (uint128.Uint128, error) {
-	result := uint128.Uint128{}
+	result := uint128.Uint128{H: 0, L: 0}
+
 	if len(data) < window {
-		return result, fmt.Errorf("data length must be at least 8")
+		return result, errLengthMismatch
 	}
 
-	for i := 0; i < window; i++ {
-		shiftAmount := startPt - i*quattuordecupleSize
+	for i := range window {
+		shiftAmount := uint(startPt - i*quattuordecupleSize)
 		// Convert val to uint128 and shift it to the correct position
-		valAs128 := uint128.Uint128{L: uint64(e.encodeMapping[data[i]])}
-		shiftedVal := valAs128.ShiftLeft(uint(shiftAmount))
+		valAs128 := uint128.Uint128{H: 0, L: uint64(e.encodeMapping[data[i]])}
+		shiftedVal := valAs128.ShiftLeft(shiftAmount)
 
 		// Combine
 		result = result.Or(shiftedVal)
 	}
+
 	return result, nil
 }
 
@@ -161,15 +174,15 @@ func (e *EFM) encodeQuattuordecuple(data []byte) (uint128.Uint128, error) {
 func (e *EFM) decodeQuattuordecuple(encodedValue uint128.Uint128) ([]byte, error) {
 	result := make([]byte, window)
 
-	for i := 0; i < window; i++ {
-		shiftAmount := startPt - i*quattuordecupleSize
+	for index := range window {
+		shiftAmount := startPt - index*quattuordecupleSize
 		decoded := e.decodeMapping[encodedValue.ShiftRight(uint(shiftAmount)).L&bufferMask]
 
 		if decoded == invalidCode {
-			return nil, fmt.Errorf("invalid value")
+			return nil, errInvalidValue
 		}
 
-		result[i] = byte(decoded)
+		result[index] = byte(decoded)
 	}
 
 	return result, nil
