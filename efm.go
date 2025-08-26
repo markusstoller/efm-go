@@ -133,7 +133,9 @@ func (e *EFM) Decode(data []byte) ([]byte, error) {
 	return result, nil
 }
 
-// encodeQuattuordecuple converts an 8-byte input slice into a uint128 value by encoding each byte and shifting into position.
+// encodeQuattuordecuple converts an 8-byte input slice into a uint128 value by encoding each byte and shifting into
+// position.
+//
 // Returns an error if the input slice length is less than 8.
 func (e *EFM) encodeQuattuordecuple(data []byte) (uint128.Uint128, error) {
 	result := uint128.Uint128{}
