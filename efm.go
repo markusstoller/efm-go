@@ -3,6 +3,7 @@ package efm_go
 import (
 	"encoding/binary"
 	"fmt"
+
 	"github.com/davidminor/uint128"
 )
 
