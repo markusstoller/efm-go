@@ -13,6 +13,7 @@ const quattuordecupleSize = 14
 const startPt = 112 - quattuordecupleSize
 const bufferMask = 0x3FFF
 const window = 8
+const shiftBits = 16
 
 type EFM struct {
 	decodeMapping [decodeBufferSize]uint16
@@ -369,7 +370,7 @@ func (e *EFM) Decode(data []byte) ([]byte, error) {
 	}
 
 	for i := 0; i < len(data); i += quattuordecupleSize {
-		uint128Data := uint128.Uint128{H: binary.BigEndian.Uint64(data[i+0:i+window]) >> 16, L: binary.BigEndian.Uint64(data[i+6 : i+14])}
+		uint128Data := uint128.Uint128{H: binary.BigEndian.Uint64(data[i+0:i+window]) >> shiftBits, L: binary.BigEndian.Uint64(data[i+6 : i+quattuordecupleSize])}
 		decoded, err := e.decodeQuattuordecuple(uint128Data)
 		if err != nil {
 			return nil, err
